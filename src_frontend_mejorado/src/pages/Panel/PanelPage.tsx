@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { TicketStatus } from "../../lib/types";
-//import { FiltersBar } from "../../components/FiltersBar";
+import { FiltersBar } from "../../components/FiltersBar";
 import { SyncButton } from "../../components/SyncButton";
 import { TicketGrid } from "../../components/TicketGrid";
 import { TicketDetailModal } from "../../components/TicketDetailModal";
@@ -10,20 +10,11 @@ import { useTicketDetail } from "../../hooks/useTicketDetail";
 import * as ticketsService from "../../services/ticketsService";
 import { useAuth } from "../../context/AuthContext";
 import { playNewTicketBeep } from "../../lib/sound";
-import { PanelToolbar } from "./PanelToolbar";
-
-type StatusFilter = "ALL" | TicketStatus;
 
 export function PanelPage() {
   const { state } = useAuth();
   const role = state.status === "authenticated" ? state.user.role : "OPERARIO";
 
-  // ✅ PanelToolbar (nuevo): Solo activos + status + búsqueda
-  const [onlyActive, setOnlyActive] = useState(true);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-
-  // ✅ Sonido (ya lo tenías): lo dejamos único y consistente
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const v = localStorage.getItem("kitchen_sound_enabled");
     return v ? v === "1" : true;
@@ -33,44 +24,18 @@ export function PanelPage() {
     localStorage.setItem("kitchen_sound_enabled", soundEnabled ? "1" : "0");
   }, [soundEnabled]);
 
-  // ✅ Conservamos filters para no romper tu FiltersBar,
-  // pero lo alimentamos desde el PanelToolbar.
-  const effectiveFilters = useMemo(() => {
-    // Regla: solo activos = PENDIENTE/EN_PREPARACION/PARCIAL
-    // Si además eliges un status específico, ese manda.
-    let status: TicketStatus | "" = "";
-
-    if (statusFilter !== "ALL") {
-      status = statusFilter;
-    } else if (onlyActive) {
-      // Nota: tu API solo acepta 1 status; así que para “solo activos”
-      // lo aplicamos en frontend (filtrando la lista), y no en la API.
-      status = "";
-    }
-
-    return { status, q: query };
-  }, [onlyActive, query, statusFilter]);
-
+  const [filters, setFilters] = useState<{ status: TicketStatus | ""; q: string }>({ status: "", q: "" });
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { data: ticketsRaw, isLoading, isError, error, refetch } = useTickets({
-    status: effectiveFilters.status ? (effectiveFilters.status as TicketStatus) : undefined,
-    q: effectiveFilters.q,
+  const { data: tickets, isLoading, isError, error, refetch } = useTickets({
+    status: filters.status ? (filters.status as TicketStatus) : undefined,
+    q: filters.q,
   });
 
-  // ✅ Aplicamos “solo activos” en frontend (porque API filtra por 1 status)
-  const tickets = useMemo(() => {
-    const list = ticketsRaw ?? [];
-    if (!onlyActive) return list;
-
-    const active = new Set<TicketStatus>(["PENDIENTE", "EN_PREPARACION", "PARCIAL"]);
-    return list.filter((t) => active.has(t.status));
-  }, [ticketsRaw, onlyActive]);
-
-  // 🔔 Beep cuando llega una comanda nueva
+  // 🔔 Beep cuando llega una comanda nueva (solo en panel)
   const seenIds = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!tickets || tickets.length === 0) return;
+    if (!tickets || !tickets.length) return;
 
     // Primera carga: marca como visto
     if (seenIds.current.size === 0) {
@@ -81,6 +46,7 @@ export function PanelPage() {
     const fresh = tickets.filter((t) => !seenIds.current.has(t.id));
     if (fresh.length > 0) {
       fresh.forEach((t) => seenIds.current.add(t.id));
+      // Evita sonido para usuarios que filtran solo LISTO, etc.
       if (soundEnabled) void playNewTicketBeep();
     }
   }, [tickets, soundEnabled]);
@@ -119,18 +85,6 @@ export function PanelPage() {
 
   return (
     <div className="space-y-4">
-      {/* ✅ NUEVO: toolbar profesional */}
-      <PanelToolbar
-        onlyActive={onlyActive}
-        onToggleOnlyActive={setOnlyActive}
-        query={query}
-        onQuery={setQuery}
-        status={statusFilter}
-        onStatus={setStatusFilter}
-        soundEnabled={soundEnabled}
-        onSoundEnabled={setSoundEnabled}
-      />
-
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="text-xs font-semibold text-slate-500">Resumen</div>
@@ -148,9 +102,15 @@ export function PanelPage() {
             Rol: <span className="font-semibold text-slate-900">{role}</span>
           </div>
 
-          {/* Nota: el switch de sonido ya está en PanelToolbar.
-              Si quieres mantener este también, puedes dejarlo,
-              pero no es necesario. Lo comento para evitar duplicidad. */}
+          <label className="hidden select-none items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm sm:flex">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={soundEnabled}
+              onChange={(e) => setSoundEnabled(e.target.checked)}
+            />
+            Sonido
+          </label>
 
           {role === "ADMIN" && <SyncButton busy={syncBusy} onClick={onSync} />}
         </div>
@@ -160,10 +120,7 @@ export function PanelPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">{syncMsg}</div>
       )}
 
-      {/* ✅ Puedes dejar FiltersBar si aún quieres mostrarlo, pero ya es redundante.
-          Si prefieres, lo removemos. Por ahora lo dejamos oculto o lo quitamos.
-          Yo lo quito para evitar doble filtro. */}
-      {/* <FiltersBar status={effectiveFilters.status} q={effectiveFilters.q} onChange={() => {}} /> */}
+      <FiltersBar status={filters.status} q={filters.q} onChange={setFilters} />
 
       {isLoading && (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">Cargando…</div>
