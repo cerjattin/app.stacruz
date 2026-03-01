@@ -6,11 +6,12 @@ from sqlalchemy.orm import Session
 from app.models.ticket import (
     KitchenTicket,
     KitchenTicketItem,
-    TicketItemEvent,
     TicketStatus,
     ItemStatus,
     AuditEventType,
 )
+
+from app.models.ticket_event import TicketEvent
 
 
 def _now():
@@ -45,28 +46,26 @@ def compute_ticket_status(items: list[KitchenTicketItem]) -> TicketStatus:
 
 
 # ==========================================================
-# AUDIT
+# AUDIT (usa ticket_events ✅)
 # ==========================================================
 
-def log_item_event(
+def log_ticket_event(
     db: Session,
     *,
-    item_id: str,
-    event_type: AuditEventType,
-    from_status: str | None,
-    to_status: str | None,
-    user_id: str | None,
+    ticket_id: str,
+    item_id: str | None,
+    event_type: str,
+    message: str,
     user_name: str | None,
-    payload: dict | None = None,
+    meta: dict | None = None,
 ):
-    ev = TicketItemEvent(
-        ticket_item_id=item_id,
+    ev = TicketEvent(
+        ticket_id=ticket_id,
+        item_id=item_id,
         event_type=event_type,
-        from_status=from_status,
-        to_status=to_status,
-        user_id=user_id,
+        message=message,
+        meta=meta,
         user_name=user_name,
-        payload=None if payload is None else str(payload),
     )
     db.add(ev)
 
@@ -89,10 +88,11 @@ def update_item_status(
     if not ticket:
         raise ValueError("Ticket no encontrado")
 
-    item = db.query(KitchenTicketItem).filter(
-        KitchenTicketItem.id == item_id,
-        KitchenTicketItem.ticket_id == ticket_id
-    ).first()
+    item = (
+        db.query(KitchenTicketItem)
+        .filter(KitchenTicketItem.id == item_id, KitchenTicketItem.ticket_id == ticket_id)
+        .first()
+    )
     if not item:
         raise ValueError("Item no encontrado")
 
@@ -113,36 +113,45 @@ def update_item_status(
 
     item.status = new_status
 
-    log_item_event(
+    # Auditoría (ticket_events)
+    log_ticket_event(
         db,
-        item_id=item.id,
-        event_type=AuditEventType.ITEM_STATUS,
-        from_status=str(old_status.value),
-        to_status=str(new_status.value),
-        user_id=user_id,
+        ticket_id=str(ticket_id),
+        item_id=str(item.id),
+        event_type=AuditEventType.ITEM_STATUS.value,
+        message=f"Item estado: {old_status.value} → {new_status.value} ({item.product_name})",
         user_name=user_name,
-        payload={"ticket_id": str(ticket_id)},
+        meta={"from": old_status.value, "to": new_status.value, "item_id": str(item.id)},
     )
 
     db.flush()
 
-    items = db.query(KitchenTicketItem).filter(
-        KitchenTicketItem.ticket_id == ticket_id
-    ).all()
-
+    items = db.query(KitchenTicketItem).filter(KitchenTicketItem.ticket_id == ticket_id).all()
     new_ticket_status = compute_ticket_status(items)
 
+    # Horas del ticket
     if new_ticket_status in (TicketStatus.EN_PREPARACION, TicketStatus.PARCIAL) and ticket.hora_preparacion is None:
         ticket.hora_preparacion = now
 
     if new_ticket_status == TicketStatus.LISTO and ticket.hora_entrega is None:
         ticket.hora_entrega = now
 
-    ticket.status = new_ticket_status
+    if ticket.status != new_ticket_status:
+        old = ticket.status
+        ticket.status = new_ticket_status
+
+        log_ticket_event(
+            db,
+            ticket_id=str(ticket_id),
+            item_id=None,
+            event_type=AuditEventType.TICKET_STATUS.value,
+            message=f"Ticket estado: {old.value} → {new_ticket_status.value}",
+            user_name=user_name,
+            meta={"from": old.value, "to": new_ticket_status.value},
+        )
 
     db.commit()
     db.refresh(item)
-
     return item
 
 
@@ -159,15 +168,15 @@ def cancel_item(
     user_id: str | None,
     user_name: str,
 ):
-
     ticket = db.query(KitchenTicket).filter(KitchenTicket.id == ticket_id).first()
     if not ticket:
         raise ValueError("Ticket no encontrado")
 
-    item = db.query(KitchenTicketItem).filter(
-        KitchenTicketItem.id == item_id,
-        KitchenTicketItem.ticket_id == ticket_id
-    ).first()
+    item = (
+        db.query(KitchenTicketItem)
+        .filter(KitchenTicketItem.id == item_id, KitchenTicketItem.ticket_id == ticket_id)
+        .first()
+    )
     if not item:
         raise ValueError("Item no encontrado")
 
@@ -178,24 +187,36 @@ def cancel_item(
     item.canceled_at = item.canceled_at or now
     item.change_reason = reason
 
-    log_item_event(
+    log_ticket_event(
         db,
-        item_id=item.id,
-        event_type=AuditEventType.ITEM_CANCEL,
-        from_status=str(old_status.value),
-        to_status=ItemStatus.CANCELADO.value,
-        user_id=user_id,
+        ticket_id=str(ticket_id),
+        item_id=str(item.id),
+        event_type=AuditEventType.ITEM_CANCEL.value,
+        message=f"Item cancelado ({item.product_name}). Motivo: {reason}",
         user_name=user_name,
-        payload={"reason": reason},
+        meta={"reason": reason, "item_id": str(item.id)},
     )
 
     db.flush()
 
-    items = db.query(KitchenTicketItem).filter(
-        KitchenTicketItem.ticket_id == ticket_id
-    ).all()
+    items = db.query(KitchenTicketItem).filter(KitchenTicketItem.ticket_id == ticket_id).all()
+    new_ticket_status = compute_ticket_status(items)
 
-    ticket.status = compute_ticket_status(items)
+    if ticket.status != new_ticket_status:
+        old = ticket.status
+        ticket.status = new_ticket_status
+        if new_ticket_status == TicketStatus.LISTO and ticket.hora_entrega is None:
+            ticket.hora_entrega = now
+
+        log_ticket_event(
+            db,
+            ticket_id=str(ticket_id),
+            item_id=None,
+            event_type=AuditEventType.TICKET_STATUS.value,
+            message=f"Ticket estado: {old.value} → {new_ticket_status.value}",
+            user_name=user_name,
+            meta={"from": old.value, "to": new_ticket_status.value},
+        )
 
     db.commit()
 
@@ -214,11 +235,11 @@ def replace_item(
     user_id: str | None,
     user_name: str,
 ):
-
-    item = db.query(KitchenTicketItem).filter(
-        KitchenTicketItem.id == item_id,
-        KitchenTicketItem.ticket_id == ticket_id
-    ).first()
+    item = (
+        db.query(KitchenTicketItem)
+        .filter(KitchenTicketItem.id == item_id, KitchenTicketItem.ticket_id == ticket_id)
+        .first()
+    )
     if not item:
         raise ValueError("Item no encontrado")
 
@@ -226,15 +247,36 @@ def replace_item(
     item.replaced_by = new_product_name
     item.change_reason = reason
 
-    log_item_event(
+    log_ticket_event(
         db,
-        item_id=item.id,
-        event_type=AuditEventType.ITEM_REPLACE,
-        from_status=None,
-        to_status=None,
-        user_id=user_id,
+        ticket_id=str(ticket_id),
+        item_id=str(item.id),
+        event_type=AuditEventType.ITEM_REPLACE.value,
+        message=f"Item cambiado: {old_name} → {new_product_name}. Motivo: {reason}",
         user_name=user_name,
-        payload={"from": old_name, "to": new_product_name, "reason": reason},
+        meta={"from": old_name, "to": new_product_name, "reason": reason, "item_id": str(item.id)},
     )
 
     db.commit()
+
+
+# ==========================================================
+# PRINT AUDIT (llámalo desde tu endpoint /print)
+# ==========================================================
+
+def log_print(
+    db: Session,
+    *,
+    ticket_id: str,
+    user_name: str | None,
+    width: int | None = None,
+):
+    log_ticket_event(
+        db,
+        ticket_id=str(ticket_id),
+        item_id=None,
+        event_type=AuditEventType.PRINT.value,
+        message=f"Impresión comanda (80mm)" if width else "Impresión comanda",
+        user_name=user_name,
+        meta={"ticket_id": str(ticket_id), "width": width},
+    )

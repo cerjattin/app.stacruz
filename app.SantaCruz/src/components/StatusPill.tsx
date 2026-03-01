@@ -1,5 +1,9 @@
-import type { ItemStatus, TicketStatus } from "../lib/types";
-import { itemStatusPillClass, statusLabel, ticketStatusPillClass } from "../lib/status";
+import type { TicketStatus, ItemStatus } from "../lib/types";
+import { ticketTone, itemTone } from "../lib/themeFood";
+
+function labelize(s: string) {
+  return s.replaceAll("_", " ");
+}
 
 export function StatusPill({
   kind,
@@ -8,6 +12,19 @@ export function StatusPill({
   kind: "ticket" | "item";
   status: TicketStatus | ItemStatus;
 }) {
-  const cls = kind === "ticket" ? ticketStatusPillClass(status as TicketStatus) : itemStatusPillClass(status as ItemStatus);
-  return <span className={cls}>{statusLabel(status)}</span>;
+  if (kind === "ticket") {
+    const ui = ticketTone(status as TicketStatus);
+    return (
+      <span className={`px-3 py-1 text-[11px] rounded-full font-extrabold tracking-wide ${ui.pill}`}>
+        {labelize(String(status))}
+      </span>
+    );
+  }
+
+  const cls = itemTone(status as ItemStatus);
+  return (
+    <span className={`px-2 py-1 text-[11px] rounded-full font-extrabold tracking-wide ${cls}`}>
+      {labelize(String(status))}
+    </span>
+  );
 }

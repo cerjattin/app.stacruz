@@ -1,20 +1,19 @@
-// src/components/AgeBadge.tsx
-
-interface Props {
+type Props = {
   minutes: number;
   tone: "ok" | "warn" | "danger";
-}
+};
 
 export function AgeBadge({ minutes, tone }: Props) {
-  const colors = {
-    ok: "bg-green-100 text-green-800",
-    warn: "bg-yellow-100 text-yellow-800",
-    danger: "bg-red-100 text-red-800 animate-pulse",
-  };
+  const cls =
+    tone === "ok"
+      ? "bg-lime-100 text-food-olive"
+      : tone === "warn"
+      ? "bg-yellow-100 text-food-mustard"
+      : "bg-red-100 text-food-wine";
 
   return (
     <span
-      className={`px-2 py-1 text-xs rounded-full font-semibold ${colors[tone]}`}
+      className={`px-2.5 py-1 text-[11px] rounded-full font-extrabold tracking-wide ${cls}`}
     >
       {minutes} min
     </span>

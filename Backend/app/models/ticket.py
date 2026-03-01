@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from sqlalchemy import (
     String,
     Text,
@@ -10,7 +11,7 @@ from sqlalchemy import (
     Numeric,
     Integer,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -33,13 +34,10 @@ class ItemStatus(str, enum.Enum):
 
 
 class AuditEventType(str, enum.Enum):
-    LOGIN = "LOGIN"
-    LOGOUT = "LOGOUT"
-    SYNC_RUN = "SYNC_RUN"
-    TICKET_STATUS = "TICKET_STATUS"
     ITEM_STATUS = "ITEM_STATUS"
     ITEM_CANCEL = "ITEM_CANCEL"
     ITEM_REPLACE = "ITEM_REPLACE"
+    TICKET_STATUS = "TICKET_STATUS"
     PRINT = "PRINT"
 
 
@@ -68,6 +66,7 @@ class KitchenTicket(Base):
         nullable=False,
         default=TicketStatus.PENDIENTE,
     )
+
     hora_preparacion: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hora_entrega: Mapped[str | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -119,9 +118,14 @@ class KitchenTicketItem(Base):
 
 
 class TicketItemEvent(Base):
+    """
+    ✅ Cambio 4 aplicado:
+    - id con default uuid4 para evitar warning PK sin default
+    - payload como JSONB (si tu DB lo tiene jsonb)
+    """
     __tablename__ = "ticket_item_events"
 
-    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     ticket_item_id: Mapped[str] = mapped_column(UUID(as_uuid=True), ForeignKey("kitchen_ticket_items.id", ondelete="CASCADE"))
 
     event_type: Mapped[AuditEventType] = mapped_column(
@@ -136,4 +140,5 @@ class TicketItemEvent(Base):
     user_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     event_at: Mapped[str] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    payload: Mapped[dict | None] = mapped_column(Text, nullable=True)  # si tu DB lo tiene jsonb, lo cambiamos a JSONB
+
+    payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

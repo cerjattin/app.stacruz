@@ -89,6 +89,10 @@ export async function replaceItem(opts: {
   });
 }
 
+/**
+ * ✅ Impresión “genérica” (como ya la tenías).
+ * Backend: POST /tickets/{id}/print (retorna HTML)
+ */
 export async function printTicket(ticketId: string): Promise<string> {
   if (API_MODE === "mock") {
     const t = mockGetTicket(ticketId);
@@ -102,9 +106,38 @@ export async function printTicket(ticketId: string): Promise<string> {
       <script>window.print()</script>
     </body></html>`;
   }
+
   const res = await api.post<string>(`/tickets/${ticketId}/print`, undefined, {
     headers: { Accept: "text/html" },
     responseType: "text",
   });
+  return res.data;
+}
+
+/**
+ * ✅ Impresión 80mm (usa el MISMO endpoint pero añade query param width=80).
+ * Si tu backend no usa width, no pasa nada.
+ */
+export async function printTicket80(ticketId: string, width = 80): Promise<string> {
+  if (API_MODE === "mock") {
+    // en mock reutilizamos printTicket
+    return await printTicket(ticketId);
+  }
+
+  const res = await api.post<string>(`/tickets/${ticketId}/print?width=${width}`, undefined, {
+    headers: { Accept: "text/html" },
+    responseType: "text",
+  });
+  return res.data;
+}
+
+/**
+ * ✅ Auditoría: GET /tickets/{id}/events
+ */
+export async function getTicketEvents(ticketId: string) {
+  if (API_MODE === "mock") {
+    return [];
+  }
+  const res = await api.get<any[]>(`/tickets/${ticketId}/events`);
   return res.data;
 }

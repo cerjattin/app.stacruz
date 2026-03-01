@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { TicketStatus } from "../../lib/types";
-//import { FiltersBar } from "../../components/FiltersBar";
 import { SyncButton } from "../../components/SyncButton";
 import { TicketGrid } from "../../components/TicketGrid";
 import { TicketDetailModal } from "../../components/TicketDetailModal";
@@ -18,12 +17,10 @@ export function PanelPage() {
   const { state } = useAuth();
   const role = state.status === "authenticated" ? state.user.role : "OPERARIO";
 
-  // ✅ PanelToolbar (nuevo): Solo activos + status + búsqueda
   const [onlyActive, setOnlyActive] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
 
-  // ✅ Sonido (ya lo tenías): lo dejamos único y consistente
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const v = localStorage.getItem("kitchen_sound_enabled");
     return v ? v === "1" : true;
@@ -33,23 +30,11 @@ export function PanelPage() {
     localStorage.setItem("kitchen_sound_enabled", soundEnabled ? "1" : "0");
   }, [soundEnabled]);
 
-  // ✅ Conservamos filters para no romper tu FiltersBar,
-  // pero lo alimentamos desde el PanelToolbar.
   const effectiveFilters = useMemo(() => {
-    // Regla: solo activos = PENDIENTE/EN_PREPARACION/PARCIAL
-    // Si además eliges un status específico, ese manda.
     let status: TicketStatus | "" = "";
-
-    if (statusFilter !== "ALL") {
-      status = statusFilter;
-    } else if (onlyActive) {
-      // Nota: tu API solo acepta 1 status; así que para “solo activos”
-      // lo aplicamos en frontend (filtrando la lista), y no en la API.
-      status = "";
-    }
-
+    if (statusFilter !== "ALL") status = statusFilter;
     return { status, q: query };
-  }, [onlyActive, query, statusFilter]);
+  }, [query, statusFilter]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -58,7 +43,6 @@ export function PanelPage() {
     q: effectiveFilters.q,
   });
 
-  // ✅ Aplicamos “solo activos” en frontend (porque API filtra por 1 status)
   const tickets = useMemo(() => {
     const list = ticketsRaw ?? [];
     if (!onlyActive) return list;
@@ -72,7 +56,6 @@ export function PanelPage() {
   useEffect(() => {
     if (!tickets || tickets.length === 0) return;
 
-    // Primera carga: marca como visto
     if (seenIds.current.size === 0) {
       tickets.forEach((t) => seenIds.current.add(t.id));
       return;
@@ -119,7 +102,6 @@ export function PanelPage() {
 
   return (
     <div className="space-y-4">
-      {/* ✅ NUEVO: toolbar profesional */}
       <PanelToolbar
         onlyActive={onlyActive}
         onToggleOnlyActive={setOnlyActive}
@@ -132,8 +114,9 @@ export function PanelPage() {
       />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="text-xs font-semibold text-slate-500">Resumen</div>
+        {/* Resumen */}
+        <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-4 shadow-sm">
+          <div className="text-xs font-extrabold tracking-wide text-food-wine">Resumen</div>
           <div className="mt-2 flex flex-wrap gap-2 text-sm">
             <Badge label="Total" value={stats.total} />
             <Badge label="Pend." value={stats.pendiente} />
@@ -144,32 +127,28 @@ export function PanelPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm sm:block">
-            Rol: <span className="font-semibold text-slate-900">{role}</span>
+          <div className="hidden rounded-2xl border border-stone-200 bg-white/70 backdrop-blur px-4 py-3 text-sm text-stone-700 shadow-sm sm:block">
+            Rol: <span className="font-extrabold text-food-wine">{role}</span>
           </div>
-
-          {/* Nota: el switch de sonido ya está en PanelToolbar.
-              Si quieres mantener este también, puedes dejarlo,
-              pero no es necesario. Lo comento para evitar duplicidad. */}
 
           {role === "ADMIN" && <SyncButton busy={syncBusy} onClick={onSync} />}
         </div>
       </div>
 
       {syncMsg && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 shadow-sm">{syncMsg}</div>
+        <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-4 text-sm text-stone-800 shadow-sm">
+          {syncMsg}
+        </div>
       )}
-
-      {/* ✅ Puedes dejar FiltersBar si aún quieres mostrarlo, pero ya es redundante.
-          Si prefieres, lo removemos. Por ahora lo dejamos oculto o lo quitamos.
-          Yo lo quito para evitar doble filtro. */}
-      {/* <FiltersBar status={effectiveFilters.status} q={effectiveFilters.q} onChange={() => {}} /> */}
 
       {isLoading && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600 shadow-sm">Cargando…</div>
+        <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-6 text-sm text-stone-700 shadow-sm">
+          Cargando…
+        </div>
       )}
+
       {isError && (
-        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 text-sm text-rose-900">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-950">
           {String((error as any)?.message || "Error cargando comandas")}
         </div>
       )}
@@ -191,9 +170,9 @@ export function PanelPage() {
 
 function Badge({ label, value }: { label: string; value: number }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-800">
-      <span className="text-slate-500">{label}</span>
-      <span className="rounded-full bg-white px-2 py-0.5 text-slate-900 shadow-sm">{value}</span>
+    <span className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-800">
+      <span className="text-stone-600">{label}</span>
+      <span className="rounded-full bg-white px-2 py-0.5 font-extrabold text-food-wine shadow-sm">{value}</span>
     </span>
   );
 }
