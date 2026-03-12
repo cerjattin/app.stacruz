@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { TicketStatus } from "../../lib/types";
+import type { TicketCard, TicketStatus } from "../../lib/types";
 import { SyncButton } from "../../components/SyncButton";
 import { TicketGrid } from "../../components/TicketGrid";
 import { TicketDetailModal } from "../../components/TicketDetailModal";
@@ -9,7 +9,8 @@ import { useTicketDetail } from "../../hooks/useTicketDetail";
 import * as ticketsService from "../../services/ticketsService";
 import { useAuth } from "../../context/AuthContext";
 import { playNewTicketBeep } from "../../lib/sound";
-import { PanelToolbar } from "./PanelToolbar";
+import { compareTicketPriority, parseDate } from "../../lib/time";
+import { PanelToolbar, type TicketSortMode } from "./PanelToolbar";
 
 type StatusFilter = "ALL" | TicketStatus;
 
@@ -20,6 +21,7 @@ export function PanelPage() {
   const [onlyActive, setOnlyActive] = useState(true);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [sortMode, setSortMode] = useState<TicketSortMode>("PRIORITY");
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const v = localStorage.getItem("kitchen_sound_enabled");
@@ -31,10 +33,17 @@ export function PanelPage() {
   }, [soundEnabled]);
 
   const effectiveFilters = useMemo(() => {
-    let status: TicketStatus | "" = "";
-    if (statusFilter !== "ALL") status = statusFilter;
-    return { status, q: query };
-  }, [query, statusFilter]);
+    let status: TicketStatus | undefined;
+
+    if (statusFilter !== "ALL") {
+      status = statusFilter;
+    }
+
+    return {
+      status,
+      q: query.trim(),
+    };
+  }, [statusFilter, query]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -45,40 +54,78 @@ export function PanelPage() {
     error,
     refetch,
   } = useTickets({
-    status: effectiveFilters.status
-      ? (effectiveFilters.status as TicketStatus)
-      : undefined,
+    status: effectiveFilters.status,
     q: effectiveFilters.q,
   });
 
-  const tickets = useMemo(() => {
-    const list = ticketsRaw ?? [];
-    if (!onlyActive) return list;
-
-    const active = new Set<TicketStatus>([
-      "PENDIENTE",
-      "EN_PREPARACION",
-      "PARCIAL",
-    ]);
-    return list.filter((t) => active.has(t.status));
-  }, [ticketsRaw, onlyActive]);
-
-  // 🔔 Beep cuando llega una comanda nueva
   const seenIds = useRef<Set<string>>(new Set());
+  const [freshIds, setFreshIds] = useState<Set<string>>(new Set());
+
+  const tickets = useMemo(() => {
+    const list = (ticketsRaw ?? []).slice();
+
+    let filtered = list;
+
+    if (onlyActive) {
+      const active = new Set<TicketStatus>([
+        "PENDIENTE",
+        "EN_PREPARACION",
+        "PARCIAL",
+      ]);
+      filtered = filtered.filter((t) => active.has(t.status));
+    }
+
+    if (sortMode === "PRIORITY") {
+      filtered.sort(compareTicketPriority);
+    } else if (sortMode === "RECENT") {
+      filtered.sort((a, b) => {
+        const da = parseDate(a.hora_pedido)?.getTime() ?? 0;
+        const db = parseDate(b.hora_pedido)?.getTime() ?? 0;
+        return db - da;
+      });
+    } else if (sortMode === "MESA") {
+      filtered.sort((a, b) =>
+        (a.mesa_ref ?? "").localeCompare(b.mesa_ref ?? "", "es", {
+          numeric: true,
+          sensitivity: "base",
+        }),
+      );
+    }
+
+    return filtered;
+  }, [ticketsRaw, onlyActive, sortMode]);
+
   useEffect(() => {
-    if (!tickets || tickets.length === 0) return;
+    if (!tickets.length) return;
 
     if (seenIds.current.size === 0) {
       tickets.forEach((t) => seenIds.current.add(t.id));
       return;
     }
 
-    const fresh = tickets.filter((t) => !seenIds.current.has(t.id));
-    if (fresh.length > 0) {
-      fresh.forEach((t) => seenIds.current.add(t.id));
+    const newIds = tickets
+      .filter((t) => !seenIds.current.has(t.id))
+      .map((t) => t.id);
+
+    if (newIds.length > 0) {
+      const nextFresh = new Set(freshIds);
+      newIds.forEach((id) => {
+        seenIds.current.add(id);
+        nextFresh.add(id);
+      });
+      setFreshIds(nextFresh);
+
       if (soundEnabled) void playNewTicketBeep();
+
+      window.setTimeout(() => {
+        setFreshIds((prev) => {
+          const clone = new Set(prev);
+          newIds.forEach((id) => clone.delete(id));
+          return clone;
+        });
+      }, 180000);
     }
-  }, [tickets, soundEnabled]);
+  }, [tickets, soundEnabled, freshIds]);
 
   const detail = useTicketDetail(selectedId);
 
@@ -88,6 +135,7 @@ export function PanelPage() {
   const stats = useMemo(() => {
     const list = tickets ?? [];
     const by = (s: TicketStatus) => list.filter((t) => t.status === s).length;
+
     return {
       total: list.length,
       pendiente: by("PENDIENTE"),
@@ -95,6 +143,15 @@ export function PanelPage() {
       parcial: by("PARCIAL"),
       listo: by("LISTO"),
     };
+  }, [tickets]);
+
+  const urgentCount = useMemo(() => {
+    return tickets.filter((t) => {
+      const d = parseDate(t.hora_pedido);
+      if (!d) return false;
+      const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+      return mins >= 25 && t.status !== "LISTO" && t.status !== "CANCELADO";
+    }).length;
   }, [tickets]);
 
   async function onSync() {
@@ -110,7 +167,7 @@ export function PanelPage() {
       setSyncMsg(err?.message || "No fue posible sincronizar");
     } finally {
       setSyncBusy(false);
-      setTimeout(() => setSyncMsg(null), 4000);
+      setTimeout(() => setSyncMsg(null), 5000);
     }
   }
 
@@ -125,26 +182,26 @@ export function PanelPage() {
         onStatus={setStatusFilter}
         soundEnabled={soundEnabled}
         onSoundEnabled={setSoundEnabled}
+        sortMode={sortMode}
+        onSortMode={setSortMode}
       />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        {/* Resumen */}
-        <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-4 shadow-sm">
-          <div className="text-xs font-extrabold tracking-wide text-food-wine">
-            Resumen
-          </div>
-          <div className="mt-2 flex flex-wrap gap-2 text-sm">
-            <Badge label="Total" value={stats.total} />
-            <Badge label="Pend." value={stats.pendiente} />
-            <Badge label="Prep." value={stats.prep} />
-            <Badge label="Parcial" value={stats.parcial} />
-            <Badge label="Listo" value={stats.listo} />
-          </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Total visibles" value={stats.total} />
+        <StatCard label="Pendientes" value={stats.pendiente} />
+        <StatCard label="En preparación" value={stats.prep} />
+        <StatCard label="Urgentes" value={urgentCount} accent="danger" />
+      </div>
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="rounded-2xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700 shadow-sm">
+          Rol: <span className="font-extrabold text-stone-900">{role}</span>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden rounded-2xl border border-stone-200 bg-white/70 backdrop-blur px-4 py-3 text-sm text-stone-700 shadow-sm sm:block">
-            Rol: <span className="font-extrabold text-food-wine">{role}</span>
+          <div className="rounded-2xl border border-stone-200 bg-food-cream px-4 py-3 text-sm font-bold text-stone-700 shadow-sm">
+            Nuevas detectadas:{" "}
+            <span className="text-food-wine">{freshIds.size}</span>
           </div>
 
           {role === "ADMIN" && <SyncButton busy={syncBusy} onClick={onSync} />}
@@ -152,27 +209,28 @@ export function PanelPage() {
       </div>
 
       {syncMsg && (
-        <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-4 text-sm text-stone-800 shadow-sm">
+        <div className="rounded-2xl border border-stone-200 bg-white p-4 text-sm text-stone-700 shadow-sm">
           {syncMsg}
         </div>
       )}
 
       {isLoading && (
-        <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-6 text-sm text-stone-700 shadow-sm">
+        <div className="rounded-2xl border border-stone-200 bg-white p-6 text-sm text-stone-600 shadow-sm">
           Cargando…
         </div>
       )}
 
       {isError && (
-        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-950">
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-sm text-red-900">
           {String((error as any)?.message || "Error cargando comandas")}
         </div>
       )}
 
       {!isLoading && !isError && (
         <TicketGrid
-          tickets={tickets ?? []}
+          tickets={tickets as TicketCard[]}
           onOpenTicket={(id) => setSelectedId(id)}
+          freshIds={freshIds}
         />
       )}
 
@@ -189,13 +247,23 @@ export function PanelPage() {
   );
 }
 
-function Badge({ label, value }: { label: string; value: number }) {
+function StatCard({
+  label,
+  value,
+  accent = "normal",
+}: {
+  label: string;
+  value: number;
+  accent?: "normal" | "danger";
+}) {
+  const valueCls = accent === "danger" ? "text-red-900" : "text-stone-900";
+
   return (
-    <span className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-800">
-      <span className="text-stone-600">{label}</span>
-      <span className="rounded-full bg-white px-2 py-0.5 font-extrabold text-food-wine shadow-sm">
-        {value}
-      </span>
-    </span>
+    <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="text-xs font-extrabold tracking-wide text-stone-500">
+        {label}
+      </div>
+      <div className={`mt-2 text-2xl font-extrabold ${valueCls}`}>{value}</div>
+    </div>
   );
 }

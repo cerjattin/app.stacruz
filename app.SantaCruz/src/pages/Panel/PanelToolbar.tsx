@@ -1,6 +1,7 @@
 import { useMemo } from "react";
+import type { TicketStatus } from "../../lib/types";
 
-type TicketStatus = "PENDIENTE" | "EN_PREPARACION" | "PARCIAL" | "LISTO" | "CANCELADO";
+export type TicketSortMode = "PRIORITY" | "RECENT" | "MESA";
 
 type Props = {
   onlyActive: boolean;
@@ -11,11 +12,9 @@ type Props = {
   onStatus: (v: TicketStatus | "ALL") => void;
   soundEnabled: boolean;
   onSoundEnabled: (v: boolean) => void;
+  sortMode: TicketSortMode;
+  onSortMode: (v: TicketSortMode) => void;
 };
-
-function labelize(s: string) {
-  return s === "ALL" ? "Todos" : s.replaceAll("_", " ");
-}
 
 export function PanelToolbar({
   onlyActive,
@@ -26,54 +25,76 @@ export function PanelToolbar({
   onStatus,
   soundEnabled,
   onSoundEnabled,
+  sortMode,
+  onSortMode,
 }: Props) {
   const statuses = useMemo(
-    () => ["ALL", "PENDIENTE", "EN_PREPARACION", "PARCIAL", "LISTO", "CANCELADO"] as const,
-    []
+    () =>
+      [
+        "ALL",
+        "PENDIENTE",
+        "EN_PREPARACION",
+        "PARCIAL",
+        "LISTO",
+        "CANCELADO",
+      ] as const,
+    [],
   );
 
   return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-3 shadow-sm">
-      <div className="flex flex-wrap gap-2 items-center">
-        <label className="flex items-center gap-2 text-sm font-semibold text-stone-800">
+    <div className="rounded-3xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-food-cream px-3 py-2 text-sm font-bold text-stone-800">
+            <input
+              type="checkbox"
+              checked={onlyActive}
+              onChange={(e) => onToggleOnlyActive(e.target.checked)}
+            />
+            Solo activos
+          </label>
+
+          <select
+            value={status}
+            onChange={(e) => onStatus(e.target.value as TicketStatus | "ALL")}
+            className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-bold text-stone-800"
+          >
+            {statuses.map((s) => (
+              <option key={s} value={s}>
+                {s === "ALL" ? "Todos" : s}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={sortMode}
+            onChange={(e) => onSortMode(e.target.value as TicketSortMode)}
+            className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-bold text-stone-800"
+          >
+            <option value="PRIORITY">Orden: prioridad</option>
+            <option value="RECENT">Orden: más recientes</option>
+            <option value="MESA">Orden: mesa</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
-            type="checkbox"
-            checked={onlyActive}
-            onChange={(e) => onToggleOnlyActive(e.target.checked)}
-            className="h-4 w-4 accent-food-wine"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+            placeholder="Buscar mesa, mesero, pedido, comanda…"
+            className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-900 placeholder:text-stone-400 sm:w-80"
           />
-          Solo activos
-        </label>
 
-        <select
-          value={status}
-          onChange={(e) => onStatus(e.target.value as any)}
-          className="px-3 py-2 rounded-xl border border-stone-200 text-sm bg-food-cream text-stone-900 font-semibold focus:outline-none focus:ring-2 focus:ring-food-mustard"
-        >
-          {statuses.map((s) => (
-            <option key={s} value={s}>
-              {labelize(s)}
-            </option>
-          ))}
-        </select>
-
-        <input
-          value={query}
-          onChange={(e) => onQuery(e.target.value)}
-          placeholder="Buscar mesa, mesero, #comanda…"
-          className="px-3 py-2 rounded-xl border border-stone-200 text-sm w-72 bg-white text-stone-900 font-semibold placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-food-mustard"
-        />
+          <label className="inline-flex items-center gap-2 rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm font-bold text-stone-800">
+            <input
+              type="checkbox"
+              checked={soundEnabled}
+              onChange={(e) => onSoundEnabled(e.target.checked)}
+            />
+            Sonido
+          </label>
+        </div>
       </div>
-
-      <label className="flex items-center gap-2 text-sm font-semibold text-stone-800">
-        <input
-          type="checkbox"
-          checked={soundEnabled}
-          onChange={(e) => onSoundEnabled(e.target.checked)}
-          className="h-4 w-4 accent-food-mustard"
-        />
-        Sonido nuevas comandas
-      </label>
     </div>
   );
 }
