@@ -429,7 +429,7 @@ def print_ticket(
 def get_ticket_events(ticket_id: UUID, db: Session = Depends(get_db)):
     rows = (
         db.query(TicketEvent)
-        .filter(TicketEvent.ticket_id == str(ticket_id))
+        .filter(TicketEvent.ticket_id == ticket_id)
         .order_by(TicketEvent.created_at.asc())
         .all()
     )

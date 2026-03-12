@@ -38,8 +38,16 @@ export function PanelPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const { data: ticketsRaw, isLoading, isError, error, refetch } = useTickets({
-    status: effectiveFilters.status ? (effectiveFilters.status as TicketStatus) : undefined,
+  const {
+    data: ticketsRaw,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useTickets({
+    status: effectiveFilters.status
+      ? (effectiveFilters.status as TicketStatus)
+      : undefined,
     q: effectiveFilters.q,
   });
 
@@ -47,7 +55,11 @@ export function PanelPage() {
     const list = ticketsRaw ?? [];
     if (!onlyActive) return list;
 
-    const active = new Set<TicketStatus>(["PENDIENTE", "EN_PREPARACION", "PARCIAL"]);
+    const active = new Set<TicketStatus>([
+      "PENDIENTE",
+      "EN_PREPARACION",
+      "PARCIAL",
+    ]);
     return list.filter((t) => active.has(t.status));
   }, [ticketsRaw, onlyActive]);
 
@@ -90,7 +102,9 @@ export function PanelPage() {
     setSyncBusy(true);
     try {
       const res = await ticketsService.runSync();
-      setSyncMsg(`Sync OK · nuevos: ${res.new_tickets} · actualizados: ${res.updated_tickets}`);
+      setSyncMsg(
+        `Sync OK · doctos: ${res.total_doctos_sqlserver ?? 0} · nuevos: ${res.new_tickets} · actualizados: ${res.updated_tickets} · items nuevos: ${res.new_items} · items actualizados: ${res.updated_items ?? 0}`,
+      );
       await refetch();
     } catch (err: any) {
       setSyncMsg(err?.message || "No fue posible sincronizar");
@@ -116,7 +130,9 @@ export function PanelPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         {/* Resumen */}
         <div className="rounded-2xl border border-stone-200 bg-white/70 backdrop-blur p-4 shadow-sm">
-          <div className="text-xs font-extrabold tracking-wide text-food-wine">Resumen</div>
+          <div className="text-xs font-extrabold tracking-wide text-food-wine">
+            Resumen
+          </div>
           <div className="mt-2 flex flex-wrap gap-2 text-sm">
             <Badge label="Total" value={stats.total} />
             <Badge label="Pend." value={stats.pendiente} />
@@ -153,7 +169,12 @@ export function PanelPage() {
         </div>
       )}
 
-      {!isLoading && !isError && <TicketGrid tickets={tickets ?? []} onOpenTicket={(id) => setSelectedId(id)} />}
+      {!isLoading && !isError && (
+        <TicketGrid
+          tickets={tickets ?? []}
+          onOpenTicket={(id) => setSelectedId(id)}
+        />
+      )}
 
       <TicketDetailModal
         open={Boolean(selectedId)}
@@ -172,7 +193,9 @@ function Badge({ label, value }: { label: string; value: number }) {
   return (
     <span className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-3 py-1 text-xs font-semibold text-stone-800">
       <span className="text-stone-600">{label}</span>
-      <span className="rounded-full bg-white px-2 py-0.5 font-extrabold text-food-wine shadow-sm">{value}</span>
+      <span className="rounded-full bg-white px-2 py-0.5 font-extrabold text-food-wine shadow-sm">
+        {value}
+      </span>
     </span>
   );
 }

@@ -1,13 +1,11 @@
 import { api } from "../lib/api";
-import type { ItemStatus, SyncRunResult, TicketDetail, TicketStatus } from "../lib/types";
+import type { ItemStatus, SyncRun, SyncRunResult, TicketDetail, TicketStatus } from "../lib/types";
 import { mockGetTicket, mockListTickets } from "../mocks/tickets";
 
 const API_MODE = (import.meta.env.VITE_API_MODE || "api").toLowerCase();
 
 export async function listTickets(params?: { status?: TicketStatus; q?: string }): Promise<TicketDetail[]> {
-  if (API_MODE === "mock") {
-    return mockListTickets(params);
-  }
+  if (API_MODE === "mock") return mockListTickets(params);
   const res = await api.get<TicketDetail[]>("/tickets", { params });
   return res.data;
 }
@@ -22,20 +20,57 @@ export async function getTicketDetail(id: string): Promise<TicketDetail> {
   return res.data;
 }
 
-export async function runSync(): Promise<SyncRunResult> {
+export async function runSync(opts?: {
+  tipo_docto?: string;
+  lookback_minutes?: number;
+  limit?: number;
+}): Promise<SyncRunResult> {
+  const payload = {
+    tipo_docto: opts?.tipo_docto ?? "01f",
+    lookback_minutes: opts?.lookback_minutes ?? 1440,
+    limit: opts?.limit ?? 300,
+  };
+
   if (API_MODE === "mock") {
     await new Promise((r) => setTimeout(r, 600));
     return {
+      ok: true,
       run_id: crypto.randomUUID(),
       mode: "MANUAL",
       new_tickets: 0,
       updated_tickets: 0,
-      errors: 0,
-      started_at: new Date().toISOString(),
-      ended_at: new Date().toISOString(),
+      new_items: 0,
+      updated_items: 0,
+      skipped_items: 0,
+      total_doctos_sqlserver: 0,
+      used_rowversion: false,
+      used_fallback_without_date_filter: false,
+      last_sync_at: new Date().toISOString(),
+      last_rowversion: null,
     };
   }
-  const res = await api.post<SyncRunResult>("/sync/run", { mode: "MANUAL" });
+
+  const res = await api.post<SyncRunResult>("/admin/sync", payload);
+  return res.data;
+}
+
+export async function listSyncRuns(limit = 50): Promise<SyncRun[]> {
+  if (API_MODE === "mock") {
+    return [];
+  }
+  const res = await api.get<SyncRun[]>("/admin/sync/runs", {
+    params: { source: "SIESA", limit },
+  });
+  return res.data;
+}
+
+export async function getLatestSyncRun(): Promise<SyncRun | null> {
+  if (API_MODE === "mock") {
+    return null;
+  }
+  const res = await api.get<SyncRun | null>("/admin/sync/runs/latest", {
+    params: { source: "SIESA" },
+  });
   return res.data;
 }
 
@@ -89,10 +124,6 @@ export async function replaceItem(opts: {
   });
 }
 
-/**
- * ✅ Impresión “genérica” (como ya la tenías).
- * Backend: POST /tickets/{id}/print (retorna HTML)
- */
 export async function printTicket(ticketId: string): Promise<string> {
   if (API_MODE === "mock") {
     const t = mockGetTicket(ticketId);
@@ -114,15 +145,8 @@ export async function printTicket(ticketId: string): Promise<string> {
   return res.data;
 }
 
-/**
- * ✅ Impresión 80mm (usa el MISMO endpoint pero añade query param width=80).
- * Si tu backend no usa width, no pasa nada.
- */
 export async function printTicket80(ticketId: string, width = 80): Promise<string> {
-  if (API_MODE === "mock") {
-    // en mock reutilizamos printTicket
-    return await printTicket(ticketId);
-  }
+  if (API_MODE === "mock") return await printTicket(ticketId);
 
   const res = await api.post<string>(`/tickets/${ticketId}/print?width=${width}`, undefined, {
     headers: { Accept: "text/html" },
@@ -131,13 +155,8 @@ export async function printTicket80(ticketId: string, width = 80): Promise<strin
   return res.data;
 }
 
-/**
- * ✅ Auditoría: GET /tickets/{id}/events
- */
 export async function getTicketEvents(ticketId: string) {
-  if (API_MODE === "mock") {
-    return [];
-  }
+  if (API_MODE === "mock") return [];
   const res = await api.get<any[]>(`/tickets/${ticketId}/events`);
   return res.data;
 }
