@@ -4,13 +4,18 @@ import type { TicketCard, TicketStatus } from "../../lib/types";
 import { SyncButton } from "../../components/SyncButton";
 import { TicketGrid } from "../../components/TicketGrid";
 import { TicketDetailModal } from "../../components/TicketDetailModal";
+import { MesaDispatchBoard } from "../../components/MesaDispatchBoard";
 import { useTickets } from "../../hooks/useTickets";
 import { useTicketDetail } from "../../hooks/useTicketDetail";
 import * as ticketsService from "../../services/ticketsService";
 import { useAuth } from "../../context/AuthContext";
 import { playNewTicketBeep } from "../../lib/sound";
 import { compareTicketPriority, parseDate } from "../../lib/time";
-import { PanelToolbar, type TicketSortMode } from "./PanelToolbar";
+import {
+  PanelToolbar,
+  type PanelViewMode,
+  type TicketSortMode,
+} from "./PanelToolbar";
 
 type StatusFilter = "ALL" | TicketStatus;
 
@@ -22,6 +27,7 @@ export function PanelPage() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [sortMode, setSortMode] = useState<TicketSortMode>("PRIORITY");
+  const [viewMode, setViewMode] = useState<PanelViewMode>("CARDS");
 
   const [soundEnabled, setSoundEnabled] = useState(() => {
     const v = localStorage.getItem("kitchen_sound_enabled");
@@ -71,6 +77,7 @@ export function PanelPage() {
         "PENDIENTE",
         "EN_PREPARACION",
         "PARCIAL",
+        "LISTO",
       ]);
       filtered = filtered.filter((t) => active.has(t.status));
     }
@@ -154,6 +161,11 @@ export function PanelPage() {
     }).length;
   }, [tickets]);
 
+  const readyToDispatchCount = useMemo(
+    () => tickets.filter((t) => t.status === "LISTO").length,
+    [tickets],
+  );
+
   async function onSync() {
     setSyncMsg(null);
     setSyncBusy(true);
@@ -184,13 +196,20 @@ export function PanelPage() {
         onSoundEnabled={setSoundEnabled}
         sortMode={sortMode}
         onSortMode={setSortMode}
+        viewMode={viewMode}
+        onViewMode={setViewMode}
       />
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         <StatCard label="Total visibles" value={stats.total} />
         <StatCard label="Pendientes" value={stats.pendiente} />
         <StatCard label="En preparación" value={stats.prep} />
         <StatCard label="Urgentes" value={urgentCount} accent="danger" />
+        <StatCard
+          label="Listas para entregar"
+          value={readyToDispatchCount}
+          accent="success"
+        />
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -226,11 +245,18 @@ export function PanelPage() {
         </div>
       )}
 
-      {!isLoading && !isError && (
+      {!isLoading && !isError && viewMode === "CARDS" && (
         <TicketGrid
           tickets={tickets as TicketCard[]}
           onOpenTicket={(id) => setSelectedId(id)}
           freshIds={freshIds}
+        />
+      )}
+
+      {!isLoading && !isError && viewMode === "MESA" && (
+        <MesaDispatchBoard
+          tickets={tickets as TicketCard[]}
+          onOpenTicket={(id) => setSelectedId(id)}
         />
       )}
 
@@ -254,9 +280,14 @@ function StatCard({
 }: {
   label: string;
   value: number;
-  accent?: "normal" | "danger";
+  accent?: "normal" | "danger" | "success";
 }) {
-  const valueCls = accent === "danger" ? "text-red-900" : "text-stone-900";
+  const valueCls =
+    accent === "danger"
+      ? "text-red-900"
+      : accent === "success"
+        ? "text-lime-900"
+        : "text-stone-900";
 
   return (
     <div className="rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">

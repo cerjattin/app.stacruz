@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { TicketStatus } from "../../lib/types";
 
 export type TicketSortMode = "PRIORITY" | "RECENT" | "MESA";
+export type PanelViewMode = "CARDS" | "MESA";
 
 type Props = {
   onlyActive: boolean;
@@ -14,6 +15,8 @@ type Props = {
   onSoundEnabled: (v: boolean) => void;
   sortMode: TicketSortMode;
   onSortMode: (v: TicketSortMode) => void;
+  viewMode: PanelViewMode;
+  onViewMode: (v: PanelViewMode) => void;
 };
 
 export function PanelToolbar({
@@ -27,6 +30,8 @@ export function PanelToolbar({
   onSoundEnabled,
   sortMode,
   onSortMode,
+  viewMode,
+  onViewMode,
 }: Props) {
   const statuses = useMemo(
     () =>
@@ -75,6 +80,31 @@ export function PanelToolbar({
             <option value="RECENT">Orden: más recientes</option>
             <option value="MESA">Orden: mesa</option>
           </select>
+
+          <div className="inline-flex overflow-hidden rounded-xl border border-stone-200">
+            <button
+              onClick={() => onViewMode("CARDS")}
+              className={[
+                "px-3 py-2 text-sm font-extrabold",
+                viewMode === "CARDS"
+                  ? "bg-food-wine text-white"
+                  : "bg-white text-stone-800 hover:bg-stone-50",
+              ].join(" ")}
+            >
+              Tarjetas
+            </button>
+            <button
+              onClick={() => onViewMode("MESA")}
+              className={[
+                "px-3 py-2 text-sm font-extrabold",
+                viewMode === "MESA"
+                  ? "bg-food-wine text-white"
+                  : "bg-white text-stone-800 hover:bg-stone-50",
+              ].join(" ")}
+            >
+              Despacho por mesa
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">

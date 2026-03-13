@@ -55,9 +55,7 @@ export async function runSync(opts?: {
 }
 
 export async function listSyncRuns(limit = 50): Promise<SyncRun[]> {
-  if (API_MODE === "mock") {
-    return [];
-  }
+  if (API_MODE === "mock") return [];
   const res = await api.get<SyncRun[]>("/admin/sync/runs", {
     params: { source: "SIESA", limit },
   });
@@ -65,9 +63,7 @@ export async function listSyncRuns(limit = 50): Promise<SyncRun[]> {
 }
 
 export async function getLatestSyncRun(): Promise<SyncRun | null> {
-  if (API_MODE === "mock") {
-    return null;
-  }
+  if (API_MODE === "mock") return null;
   const res = await api.get<SyncRun | null>("/admin/sync/runs/latest", {
     params: { source: "SIESA" },
   });
@@ -88,6 +84,36 @@ export async function updateItemStatus(opts: {
     status: opts.status,
     user_name: opts.user_name,
   });
+}
+
+export async function prepareAllItems(opts: {
+  ticketId: string;
+  user_name: string;
+}): Promise<{ ok: boolean; changed_items: number }> {
+  if (API_MODE === "mock") {
+    await new Promise((r) => setTimeout(r, 250));
+    return { ok: true, changed_items: 0 };
+  }
+  const res = await api.post<{ ok: boolean; changed_items: number }>(
+    `/tickets/${opts.ticketId}/prepare-all`,
+    { user_name: opts.user_name }
+  );
+  return res.data;
+}
+
+export async function deliverAllItems(opts: {
+  ticketId: string;
+  user_name: string;
+}): Promise<{ ok: boolean; changed_items: number }> {
+  if (API_MODE === "mock") {
+    await new Promise((r) => setTimeout(r, 250));
+    return { ok: true, changed_items: 0 };
+  }
+  const res = await api.post<{ ok: boolean; changed_items: number }>(
+    `/tickets/${opts.ticketId}/deliver-all`,
+    { user_name: opts.user_name }
+  );
+  return res.data;
 }
 
 export async function cancelItem(opts: {

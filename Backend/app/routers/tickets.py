@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
-from app.db.session import get_db  # tu get_db real
+from app.db.session import get_db
 from app.models.ticket import KitchenTicket, KitchenTicketItem, TicketStatus, ItemStatus
 from app.models.ticket_event import TicketEvent
 
@@ -20,10 +20,6 @@ router = APIRouter(prefix="/tickets", tags=["tickets"])
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
-
-# =========================
-# Schemas (Responses)
-# =========================
 
 class TicketItemOut(BaseModel):
     id: UUID
@@ -72,10 +68,6 @@ class TicketEventOut(BaseModel):
         from_attributes = True
 
 
-# =========================
-# Schemas (Requests)
-# =========================
-
 class UpdateItemStatusIn(BaseModel):
     status: ItemStatus
     user_name: str = Field(default="Operario")
@@ -92,9 +84,9 @@ class ReplaceItemIn(BaseModel):
     user_name: str = Field(default="Operario")
 
 
-# =========================
-# Helpers
-# =========================
+class BulkTicketActionIn(BaseModel):
+    user_name: str = Field(default="Operario")
+
 
 def _log_event(
     db: Session,
@@ -145,10 +137,6 @@ def _set_ticket_times(ticket: KitchenTicket, new_status: TicketStatus):
     if new_status == TicketStatus.LISTO and ticket.hora_entrega is None:
         ticket.hora_entrega = now
 
-
-# =========================
-# Endpoints
-# =========================
 
 @router.get("", response_model=list[TicketCardOut])
 def list_tickets(
@@ -252,6 +240,130 @@ def update_item_status(ticket_id: UUID, item_id: UUID, payload: UpdateItemStatus
 
     db.commit()
     return {"ok": True}
+
+
+@router.post("/{ticket_id}/prepare-all")
+def prepare_all_items(ticket_id: UUID, payload: BulkTicketActionIn, db: Session = Depends(get_db)):
+    ticket = (
+        db.query(KitchenTicket)
+        .options(selectinload(KitchenTicket.items))
+        .filter(KitchenTicket.id == ticket_id)
+        .first()
+    )
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    now = _now()
+    changed = 0
+
+    for item in ticket.items:
+        if item.status in (ItemStatus.PENDIENTE,):
+            old_status = item.status
+            item.status = ItemStatus.EN_PREPARACION
+            if item.prep_started_at is None:
+                item.prep_started_at = now
+            changed += 1
+
+            _log_event(
+                db,
+                ticket_id=ticket.id,
+                item_id=item.id,
+                event_type="ITEM_STATUS",
+                message=f"Item estado: {old_status.value} → EN_PREPARACION ({item.product_name})",
+                user_name=payload.user_name,
+                meta={"from": old_status.value, "to": "EN_PREPARACION", "item_id": str(item.id)},
+            )
+
+    old_ticket = ticket.status
+    ticket.status = _compute_ticket_status(ticket.items)
+    _set_ticket_times(ticket, ticket.status)
+
+    if old_ticket != ticket.status:
+        _log_event(
+            db,
+            ticket_id=ticket.id,
+            item_id=None,
+            event_type="TICKET_STATUS",
+            message=f"Ticket estado: {old_ticket.value} → {ticket.status.value}",
+            user_name=payload.user_name,
+            meta={"from": old_ticket.value, "to": ticket.status.value},
+        )
+
+    _log_event(
+        db,
+        ticket_id=ticket.id,
+        item_id=None,
+        event_type="TICKET_PREPARE_ALL",
+        message=f"Preparación masiva aplicada a {changed} item(s)",
+        user_name=payload.user_name,
+        meta={"changed_items": changed},
+    )
+
+    db.commit()
+    return {"ok": True, "changed_items": changed}
+
+
+@router.post("/{ticket_id}/deliver-all")
+def deliver_all_items(ticket_id: UUID, payload: BulkTicketActionIn, db: Session = Depends(get_db)):
+    ticket = (
+        db.query(KitchenTicket)
+        .options(selectinload(KitchenTicket.items))
+        .filter(KitchenTicket.id == ticket_id)
+        .first()
+    )
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    now = _now()
+    changed = 0
+
+    for item in ticket.items:
+        if item.status not in (ItemStatus.ENTREGADO, ItemStatus.CANCELADO):
+            old_status = item.status
+            item.status = ItemStatus.ENTREGADO
+            if item.delivered_at is None:
+                item.delivered_at = now
+            if item.prep_started_at is None:
+                item.prep_started_at = now
+            changed += 1
+
+            _log_event(
+                db,
+                ticket_id=ticket.id,
+                item_id=item.id,
+                event_type="ITEM_STATUS",
+                message=f"Item estado: {old_status.value} → ENTREGADO ({item.product_name})",
+                user_name=payload.user_name,
+                meta={"from": old_status.value, "to": "ENTREGADO", "item_id": str(item.id)},
+            )
+
+    old_ticket = ticket.status
+    ticket.status = _compute_ticket_status(ticket.items)
+    _set_ticket_times(ticket, ticket.status)
+
+    if old_ticket != ticket.status:
+        _log_event(
+            db,
+            ticket_id=ticket.id,
+            item_id=None,
+            event_type="TICKET_STATUS",
+            message=f"Ticket estado: {old_ticket.value} → {ticket.status.value}",
+            user_name=payload.user_name,
+            meta={"from": old_ticket.value, "to": ticket.status.value},
+        )
+
+    _log_event(
+        db,
+        ticket_id=ticket.id,
+        item_id=None,
+        event_type="TICKET_DELIVER_ALL",
+        message=f"Entrega completa aplicada a {changed} item(s)",
+        user_name=payload.user_name,
+        meta={"changed_items": changed},
+    )
+
+    db.commit()
+    return {"ok": True, "changed_items": changed}
 
 
 @router.post("/{ticket_id}/items/{item_id}/cancel")
@@ -429,7 +541,7 @@ def print_ticket(
 def get_ticket_events(ticket_id: UUID, db: Session = Depends(get_db)):
     rows = (
         db.query(TicketEvent)
-        .filter(TicketEvent.ticket_id == ticket_id)
+        .filter(TicketEvent.ticket_id == str(ticket_id))
         .order_by(TicketEvent.created_at.asc())
         .all()
     )
